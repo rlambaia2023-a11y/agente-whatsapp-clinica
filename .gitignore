@@ -1,0 +1,5 @@
+node_modules/
+.env
+data/wa-session/
+data/wa-qr.png
+data/atendimento-pendente.jsonl
