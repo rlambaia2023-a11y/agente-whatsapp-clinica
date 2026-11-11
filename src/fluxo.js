@@ -266,6 +266,17 @@ async function processar(sessao, textoRaw, deps) {
     responder('Anotei seu pedido de remarcação e encaminhei para a clínica. A equipe confirma o novo horário aqui mesmo no WhatsApp. Obrigada! 💚');
     return respostas;
   }
+  if (sessao.etapa === 'atendimento_humano') {
+    if (/^(encerrar|sair|finalizar|0|menu|voltar)$/.test(t)) {
+      sessao.etapa = 'idle';
+      sessao.dados = {};
+      responder('Atendimento com a atendente encerrado. ' + MENU);
+      return respostas;
+    }
+    await deps.registrarAtendimento({ tipo: 'mensagem_atendimento', telefone: deps.telefone, detalhe: texto });
+    responder('Mensagem encaminhada para a atendente. Ela responde aqui no WhatsApp. Para encerrar este atendimento, responda *encerrar*.');
+    return respostas;
+  }
 
   // Fora de um fluxo: classifica a intenção.
   let cls = classificarRegras(texto);
@@ -345,8 +356,9 @@ async function processar(sessao, textoRaw, deps) {
       responder('Por aqui eu não consigo avaliar sintomas, exames ou remédios, para a sua segurança. O ideal é uma consulta com a Dra. Mayara. Quer agendar? Responda *1*. Se for algo urgente, procure atendimento presencial.');
       break;
     case 'atendente':
+      sessao.etapa = 'atendimento_humano';
       await deps.registrarAtendimento({ tipo: 'atendente', telefone: deps.telefone, detalhe: texto });
-      responder('Encaminhei para uma atendente da clínica. Ela responde aqui mesmo neste número. Se preferir, pode ligar para ' + config.MH_CUIDAR_TELEFONE + '.');
+      responder('Encaminhei para uma atendente da clínica. Ela responde aqui mesmo neste número.\nSe preferir, pode ligar para ' + config.MH_CUIDAR_TELEFONE + '.\nPara encerrar este atendimento e voltar ao menu, responda *encerrar*.');
       break;
     default:
       responder(MENU);
