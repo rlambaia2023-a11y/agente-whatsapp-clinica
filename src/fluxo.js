@@ -105,7 +105,7 @@ function textoInfo(info) {
   }
   linhas.push(`• *Online* — todos os dias, 08h às 17h (Google Meet)`);
   linhas.push('', `• *MH Cuidar em Muritiba* — ${config.MH_CUIDAR_ENDERECO}, ${config.MH_CUIDAR_TELEFONE}`);
-  linhas.push('  Agendamento pelo link: ' + config.MH_CUIDAR_LINK);
+  linhas.push('  Acesse o sistema para criar sua conta e agendar: ' + config.MH_CUIDAR_LINK);
   if (config.FACEBOOK_URL) linhas.push('', 'Também estamos no Facebook: ' + config.FACEBOOK_URL);
   linhas.push('', 'Consultas particulares, 60 minutos. Para agendar, responda *1*.');
   return linhas.join('\n');
@@ -118,9 +118,10 @@ function textoMhCuidar() {
     `${config.MH_CUIDAR_ENDERECO}`,
     `Telefone: ${config.MH_CUIDAR_TELEFONE}`,
     '',
-    'Agende direto pelo link oficial:',
+    'Para agendar no MH Cuidar, acesse o sistema:',
     config.MH_CUIDAR_LINK,
     '',
+    'Crie sua conta e agende sua consulta por lá.',
     'Os horários aparecem na página. Se preferir a Gineco na Maraclin, na Santa Casa ou online, responda *1* que eu agendo aqui mesmo.',
   ].join('\n');
 }
@@ -308,13 +309,14 @@ async function processar(sessao, textoRaw, deps) {
         const r = await deps.clinica.meusAgendamentos(deps.telefone);
         const lista = (r.agendamentos || []).filter((a) => a.status !== 'cancelado');
         if (!lista.length) {
-          responder('Não encontrei consultas marcadas com este número. Para agendar, responda *1*.');
+          responder(`Não encontrei consultas marcadas com este número.\n\nPara agendar (inclusive no MH Cuidar), acesse o sistema: ${config.MH_CUIDAR_LINK}\nCrie sua conta e agende sua consulta por lá.\n\nOu responda *1* para agendar na Maraclin, Santa Casa ou online.`);
         } else {
           const linhas = ['📅 *Suas consultas:*', ''];
           for (const a of lista.slice(0, 5)) {
             linhas.push(`• ${fmtDataCurta(a.data)} às ${a.hora} — ${a.tipoConsulta || 'Consulta'} (${a.localId === 'online' ? 'online' : a.localId}) — ${a.status}`);
           }
           linhas.push('', 'Para remarcar alguma, responda *remarcar* e me diga qual e o novo dia.');
+          linhas.push('', `Consultas MH Cuidar: acesse ${config.MH_CUIDAR_LINK}, crie sua conta e agende por lá.`);
           responder(linhas.join('\n'));
         }
       } catch {

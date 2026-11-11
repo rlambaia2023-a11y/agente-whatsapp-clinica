@@ -16,7 +16,7 @@ module.exports = {
   NUMERO_AGENTE: (process.env.NUMERO_AGENTE || '5575981089146').replace(/\D/g, ''),
   // Agendamento MH Cuidar em Muritiba (PEPMH): não tem API pública para
   // reservar direto, por isso o agente manda o link oficial.
-  MH_CUIDAR_LINK: process.env.MH_CUIDAR_LINK || 'https://pepmh-web-production.up.railway.app/#/agendar/mhcuidar',
+  MH_CUIDAR_LINK: process.env.MH_CUIDAR_LINK || 'https://pepmh-web-production.up.railway.app/#/',
   MH_CUIDAR_ENDERECO: 'Avenida Paulo Souto, 34, Muritiba/BA',
   MH_CUIDAR_TELEFONE: '(75) 99181-5612',
   // Página no Facebook: Mh.cuidar, perfil profissional.
