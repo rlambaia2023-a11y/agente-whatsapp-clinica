@@ -26,4 +26,8 @@ module.exports = {
   // funciona só com regras e menu, sem inventar resposta.
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
+  // Avisos do PEPMH: chave que o PEPMH envia no cabeçalho Authorization e número que recebe
+  // (vazio = o próprio WhatsApp da MH, na conversa "mensagem para si").
+  AVISOS_TOKEN: process.env.AVISOS_TOKEN || '',
+  AVISOS_PARA: (process.env.AVISOS_PARA || '').replace(/\D/g, ''),
 };

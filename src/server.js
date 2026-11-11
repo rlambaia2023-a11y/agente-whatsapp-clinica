@@ -5,14 +5,18 @@
 // POST /api/reconectar — reinicia a conexão (gera novo QR).
 // POST /api/limpar-sessao — apaga a sessão salva e força novo pareamento.
 // POST /api/pareamento — { numero } devolve o código de 8 caracteres.
+// POST /api/avisar — { texto } aviso do PEPMH para o WhatsApp da MH (exige Authorization: Bearer AVISOS_TOKEN).
 const http = require('http');
 const fs = require('fs');
 const config = require('./config');
 const agente = require('./agente');
 const gemini = require('./gemini');
 const bot = require('./bot');
+const avisos = require('./avisos');
+const crypto = require('crypto');
+const tokenOk = (req) => { const t = config.AVISOS_TOKEN, h = String(req.headers.authorization || '').replace(/^Bearer\s+/i, ''); return t.length >= 24 && h.length === t.length && crypto.timingSafeEqual(Buffer.from(h), Buffer.from(t)); };
 
-const VERSAO = '1.0.1';
+const VERSAO = '1.1.0';
 
 function enviar(res, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -32,7 +36,7 @@ const server = http.createServer(async (req, res) => {
     return enviar(res, 200, { ok: true, servico: 'agente-whatsapp-clinica', versao: VERSAO, whatsapp: agente.status().estado, numeroAgente: config.NUMERO_AGENTE, clinicaApi: config.CLINICA_API_URL, ia: gemini.status() });
   }
   if (req.method === 'GET' && url.pathname === '/status') {
-    return enviar(res, 200, { ok: true, whatsapp: agente.status(), ia: gemini.status(), facebookUrlConfigurada: Boolean(config.FACEBOOK_URL) });
+    return enviar(res, 200, { ok: true, whatsapp: agente.status(), ia: gemini.status(), facebookUrlConfigurada: Boolean(config.FACEBOOK_URL), avisosNaFila: avisos.pendentes() });
   }
   if (req.method === 'GET' && url.pathname === '/qr.png') {
     const st = agente.status();
@@ -61,6 +65,12 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       return enviar(res, 400, { ok: false, erro: e.message, whatsapp: agente.status() });
     }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/avisar') {
+    if (!tokenOk(req)) return enviar(res, 401, { ok: false, erro: 'Não autorizado.' });
+    const b = await lerCorpo(req);
+    try { return enviar(res, 200, { ok: true, ...(await avisos.avisar(b.texto)) }); }
+    catch (e) { return enviar(res, 400, { ok: false, erro: e.message }); }
   }
   return enviar(res, 404, { ok: false, erro: 'Rota não encontrada.' });
 });

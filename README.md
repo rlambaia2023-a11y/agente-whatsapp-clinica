@@ -54,6 +54,8 @@ Pareamento: escaneie o QR com o WhatsApp do número +55 75 98108-9146 (Aparelhos
 | `MH_CUIDAR_LINK` | https://pepmh-web-production.up.railway.app/#/agendar/mhcuidar |
 | `FACEBOOK_URL` | https://www.facebook.com/people/Mhcuidar/61596125085494/ |
 | `GEMINI_API_KEY` | vazio (opcional) |
+| `AVISOS_TOKEN` | chave dos avisos do PEPMH (mín. 24 caracteres; sem ela, `/api/avisar` recusa tudo) |
+| `AVISOS_PARA` | número que recebe os avisos (vazio = o próprio WhatsApp da MH, conversa "mensagem para si") |
 | `DATA_DIR` | `data/` local, `/app/data` na Railway (volume) |
 
 ## Deploy
