@@ -30,9 +30,20 @@ Pareamento: escaneie o QR com o WhatsApp do número +55 75 98108-9146 (Aparelhos
 
 - `GET /health` — versão, estado do WhatsApp, IA e API da clínica.
 - `GET /status` — estado da conexão e se a URL do Facebook está configurada.
-- `GET /qr.png` — QR de pareamento, quando disponível.
+- `GET /qr.png` — QR de pareamento, quando disponível (sem cache; sempre recarregue a imagem).
 - `POST /api/reconectar` — reinicia a conexão.
-- `POST /api/pareamento` — `{ "numero": "5575981089146" }` devolve o código.
+- `POST /api/limpar-sessao` — apaga a sessão salva e força um novo pareamento (útil se o QR/código não conclui).
+- `POST /api/pareamento` — `{ "numero": "5575981089146" }` devolve o código de 8 dígitos.
+
+## Pareamento (QR ou código)
+
+1. Confirme que o **celular com o chip do número do agente (+55 75 98108-9146)** está com internet e WhatsApp atualizado.
+2. Abra `/qr.png?t=1` (ou adicione um número diferente a cada tentativa) e escaneie em **Aparelhos conectados → Conectar aparelho**. O QR expira/renova rápido — se demorar, recarregue a imagem e escaneie o novo.
+3. Se o QR não concluir, tente o código: `POST /api/pareamento` e digite os 8 caracteres em **Aparelhos conectados → Conectar aparelho → Conectar com número de telefone**.
+4. Se falhar repetidamente, limpe a sessão e gere um QR novo: `POST /api/limpar-sessao` e escaneie novamente.
+5. Em hospedagem (Railway), use **volume persistente em `/app/data`**. Sem volume, a sessão se perde a cada deploy e será preciso parear de novo.
+
+> Observação: este projeto usa uma correção do Baileys para o fluxo de pareamento (`companion_reg_refresh`) que pode impedir a conclusão do QR/código nas versões rc atuais.
 
 ## Variáveis
 

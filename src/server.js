@@ -1,8 +1,9 @@
 // Servidor do agente de WhatsApp da clínica.
 // GET /health — versão e estado, sem expor dados de paciente.
 // GET /status — estado da conexão WhatsApp e da IA.
-// GET /qr.png — QR de pareamento, quando disponível.
+// GET /qr.png — QR de pareamento, quando disponível (sem cache).
 // POST /api/reconectar — reinicia a conexão (gera novo QR).
+// POST /api/limpar-sessao — apaga a sessão salva e força novo pareamento.
 // POST /api/pareamento — { numero } devolve o código de 8 caracteres.
 const http = require('http');
 const fs = require('fs');
@@ -11,10 +12,10 @@ const agente = require('./agente');
 const gemini = require('./gemini');
 const bot = require('./bot');
 
-const VERSAO = '1.0.0';
+const VERSAO = '1.0.1';
 
 function enviar(res, status, obj) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
 }
 function lerCorpo(req) {
@@ -34,20 +35,31 @@ const server = http.createServer(async (req, res) => {
     return enviar(res, 200, { ok: true, whatsapp: agente.status(), ia: gemini.status(), facebookUrlConfigurada: Boolean(config.FACEBOOK_URL) });
   }
   if (req.method === 'GET' && url.pathname === '/qr.png') {
-    if (!fs.existsSync(agente.QR_PATH)) return enviar(res, 404, { ok: false, erro: 'Sem QR no momento. O agente pode já estar conectado.' });
-    res.writeHead(200, { 'Content-Type': 'image/png' });
+    const st = agente.status();
+    if (!st.qrDisponivel || !fs.existsSync(agente.QR_PATH)) {
+      return enviar(res, 404, { ok: false, erro: 'Sem QR no momento. Se já estiver conectado, não é preciso parear.', whatsapp: st });
+    }
+    res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    });
     return fs.createReadStream(agente.QR_PATH).pipe(res);
   }
   if (req.method === 'POST' && url.pathname === '/api/reconectar') {
-    return enviar(res, 200, { ok: agente.reconnect(), mensagem: 'Reconectando — novo QR em instantes.' });
+    return enviar(res, 200, { ok: agente.reconnect(), mensagem: 'Reconectando — aguarde alguns segundos e atualize o QR.' });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/limpar-sessao') {
+    return enviar(res, 200, { ok: agente.resetSession(), mensagem: 'Sessão apagada. Um novo QR será gerado em instantes — escaneie com o celular do número do agente.' });
   }
   if (req.method === 'POST' && url.pathname === '/api/pareamento') {
     const b = await lerCorpo(req);
     try {
       const codigo = await agente.requestPairingCode(b.numero || config.NUMERO_AGENTE);
-      return enviar(res, 200, { ok: true, codigo });
+      return enviar(res, 200, { ok: true, codigo, dica: 'No WhatsApp: Aparelhos conectados > Conectar aparelho > Conectar com número de telefone.' });
     } catch (e) {
-      return enviar(res, 400, { ok: false, erro: e.message });
+      return enviar(res, 400, { ok: false, erro: e.message, whatsapp: agente.status() });
     }
   }
   return enviar(res, 404, { ok: false, erro: 'Rota não encontrada.' });

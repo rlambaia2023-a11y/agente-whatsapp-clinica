@@ -2,8 +2,7 @@
 // intermediário pago. Pareamento: na primeira vez, um QR é gerado em
 // data/wa-qr.png, escaneie com o WhatsApp do número da clínica
 // (Aparelhos conectados → Conectar aparelho). A sessão fica salva em
-// data/wa-session/ e reconecta sozinha depois. Adaptado do agente de
-// plantões do mhcuidar-plantoes, que já usa este mesmo padrão.
+// data/wa-session/ e reconecta sozinha depois.
 const fs = require('fs');
 const path = require('path');
 const QRCode = require('qrcode');
@@ -12,6 +11,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  Browsers,
 } = require('@whiskeysockets/baileys');
 const config = require('./config');
 
@@ -22,6 +22,9 @@ let sock = null;
 let estado = 'desconectado'; // desconectado | pareando | conectado
 let onMessage = null;
 let tentando = false;
+let reconnectTimer = null;
+let qrGeradoEm = null;
+let ultimoErro = null;
 
 function proxyAgent() {
   const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
@@ -46,54 +49,91 @@ function textoDe(m) {
 
 async function gerarQR(qr) {
   estado = 'pareando';
+  qrGeradoEm = new Date().toISOString();
   fs.mkdirSync(path.dirname(QR_PATH), { recursive: true });
   await QRCode.toFile(QR_PATH, qr, { width: 512, margin: 2 });
-  console.log(`[agente] QR de pareamento gerado em ${QR_PATH} — escaneie com o WhatsApp do número ${config.NUMERO_AGENTE}.`);
+  console.log(`[agente] QR atualizado em ${qrGeradoEm} (${QR_PATH}) — escaneie com o WhatsApp do número ${config.NUMERO_AGENTE}.`);
+}
+
+function limparQR() {
+  qrGeradoEm = null;
+  try { fs.unlinkSync(QR_PATH); } catch {}
+}
+
+function encerrarSocket(atual) {
+  if (!atual) return;
+  try { atual.ev.removeAllListeners(); } catch {}
+  try { atual.ws?.close(); } catch {}
+  try { atual.end?.(undefined); } catch {}
 }
 
 async function conectar() {
   if (tentando) return;
   tentando = true;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   try {
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
-    const { version } = await fetchLatestBaileysVersion();
-    sock = makeWASocket({
+    let version;
+    try { ({ version } = await fetchLatestBaileysVersion()); } catch { version = undefined; }
+
+    const atual = makeWASocket({
       version,
       auth: state,
       printQRInTerminal: false,
-      browser: ['mhcuidar-clinica', 'agente', '1.0'],
+      browser: Browsers.ubuntu('Chrome'),
       syncFullHistory: false,
+      markOnlineOnConnect: false,
+      connectTimeoutMs: 60_000,
+      defaultQueryTimeoutMs: 60_000,
+      keepAliveIntervalMs: 30_000,
       agent: proxyAgent(),
     });
-    sock.ev.on('creds.update', saveCreds);
-    sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-      if (qr) await gerarQR(qr);
+    sock = atual;
+    ultimoErro = null;
+
+    atual.ev.on('creds.update', saveCreds);
+    atual.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+      if (atual !== sock) return;
+      if (qr) {
+        try { await gerarQR(qr); } catch (e) { console.error('[agente] falha ao salvar QR:', e.message); }
+      }
       if (connection === 'open') {
         estado = 'conectado';
         tentando = false;
-        try { fs.unlinkSync(QR_PATH); } catch {}
+        ultimoErro = null;
+        limparQR();
         console.log('[agente] WhatsApp conectado ✓');
       }
       if (connection === 'close') {
+        if (atual !== sock) return;
         estado = 'desconectado';
         tentando = false;
-        const code = lastDisconnect?.error?.output?.statusCode;
+        const err = lastDisconnect?.error;
+        const code = err?.output?.statusCode || err?.statusCode;
+        ultimoErro = err?.message || (code ? `Código ${code}` : 'Conexão fechada');
         const deslogado = code === DisconnectReason.loggedOut;
-        console.log(`[agente] conexão fechada (código ${code})${deslogado ? ' — sessão inválida, gere novo QR' : ' — tentando reconectar...'}`);
-        if (deslogado) fs.rmSync(SESSION_DIR, { recursive: true, force: true });
-        setTimeout(() => { tentando = false; conectar(); }, deslogado ? 5000 : 8000);
+        console.log(`[agente] conexão fechada (código ${code || '?'})${deslogado ? ' — sessão inválida, limpando para novo pareamento' : ' — reconectando...'}`);
+        if (deslogado) {
+          try { fs.rmSync(SESSION_DIR, { recursive: true, force: true }); } catch {}
+          limparQR();
+        }
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => { reconnectTimer = null; conectar(); }, deslogado ? 3000 : 8000);
       }
     });
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify' || !onMessage) return;
+    atual.ev.on('messages.upsert', async ({ messages, type }) => {
+      if (atual !== sock || type !== 'notify' || !onMessage) return;
       for (const m of messages) {
-        try { await onMessage(m, sock); } catch (e) { console.error('[agente] erro ao processar mensagem:', e.message); }
+        try { await onMessage(m, atual); } catch (e) { console.error('[agente] erro ao processar mensagem:', e.message); }
       }
     });
   } catch (e) {
     tentando = false;
+    ultimoErro = e.message;
     console.error('[agente] falha ao conectar:', e.message);
-    setTimeout(conectar, 15000);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; conectar(); }, 15000);
   }
 }
 
@@ -105,28 +145,54 @@ async function enviar(numero, texto) {
 
 function iniciar(handleMessage) {
   onMessage = handleMessage;
+  limparQR();
   conectar();
 }
 
 async function requestPairingCode(numero) {
   const dig = String(numero || '').replace(/\D/g, '');
   if (dig.length < 10) throw new Error('Número inválido. Use DDI+DDD+número, só dígitos.');
-  if (!sock) throw new Error('Agente não iniciado.');
+  if (!sock) throw new Error('Agente não iniciado. Aguarde o serviço iniciar e tente de novo.');
+  if (estado === 'conectado') throw new Error('O WhatsApp já está conectado.');
   return sock.requestPairingCode(dig);
 }
 
 function reconnect() {
-  try { sock?.ws?.close(); } catch {}
-  try { sock?.end?.(); } catch {}
+  const antigo = sock;
   sock = null;
   tentando = false;
   estado = 'desconectado';
-  setTimeout(conectar, 1000);
+  ultimoErro = null;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  encerrarSocket(antigo);
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; conectar(); }, 1000);
+  return true;
+}
+
+function resetSession() {
+  const antigo = sock;
+  sock = null;
+  tentando = false;
+  estado = 'desconectado';
+  ultimoErro = null;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  encerrarSocket(antigo);
+  try { fs.rmSync(SESSION_DIR, { recursive: true, force: true }); } catch {}
+  limparQR();
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; conectar(); }, 1000);
   return true;
 }
 
 function status() {
-  return { estado, numeroAgente: config.NUMERO_AGENTE, qrDisponivel: fs.existsSync(QR_PATH), qrPath: QR_PATH };
+  const qrDisponivel = fs.existsSync(QR_PATH);
+  return {
+    estado,
+    numeroAgente: config.NUMERO_AGENTE,
+    qrDisponivel,
+    qrPath: QR_PATH,
+    qrGeradoEm: qrDisponivel ? qrGeradoEm : null,
+    ultimoErro,
+  };
 }
 
-module.exports = { iniciar, enviar, status, reconnect, requestPairingCode, textoDe, numeroDe, jidDe, QR_PATH };
+module.exports = { iniciar, enviar, status, reconnect, resetSession, requestPairingCode, textoDe, numeroDe, jidDe, QR_PATH };
